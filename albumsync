@@ -1,0 +1,69 @@
+#! /usr/bin/env python3
+
+"""
+Add songs from your saved albums into a playlist.
+
+Usage:
+  ./albumsync <username> [--playlist=<name>]
+  ./albumsync (-h | --help)
+
+Arguments:
+  <username>         Your Spotify username.
+
+Options:
+  --playlist=<name>  Playlist name to use [default: All Albums].
+  -h --help          Show this help text.
+"""
+
+import docopt
+import spotipy
+import spotipy.util as util
+
+
+def main(args):
+    user = args['<username>']
+    scope = 'user-library-read playlist-modify-public'
+    token = util.prompt_for_user_token(user, scope)
+    if token:
+        sp = spotipy.Spotify(auth=token)
+
+        albums = []
+        offset = 0
+        while True:
+            album_res = sp.current_user_saved_albums(limit=50, offset=offset)
+            albums += [item['album'] for item in album_res['items']]
+            if len(album_res['items']) < 50:
+                break
+            offset += 50
+        albums = sorted(albums, key=lambda a: get_artist_name(a))
+
+        tracks = []
+        for album in albums:
+            tracks += [track['id'] for track in album['tracks']['items']]
+
+        playlist_res = sp.current_user_playlists()
+        playlist_map = {p['name']: p['id'] for p in playlist_res['items']}
+        playlist_name = args['--playlist']
+        try:
+            playlist_id = playlist_map[playlist_name]
+        except KeyError:
+            print(f'Playlist "{playlist_name}" does not exist! Exiting...')
+            return
+
+        sp.user_playlist_replace_tracks(user, playlist_id, [])
+        track_slices = [tracks[i:i + 100] for i in range(0, len(tracks), 100)]
+        for track_slice in track_slices:
+            sp.user_playlist_add_tracks(user, playlist_id, track_slice)
+
+
+def get_artist_name(album):
+    artist = album['artists'][0]['name']
+    artist = artist.upper()
+    if artist.split(' ')[0] in ['A', 'AN', 'THE']:
+        artist = ' '.join(artist.split(' ')[1:])
+    return artist
+
+
+if __name__ == '__main__':
+    args = docopt.docopt(__doc__)
+    main(args)
